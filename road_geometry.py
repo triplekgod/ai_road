@@ -104,6 +104,24 @@ def _row_center_mask(road, center_share):
     return result
 
 
+def _has_persistent_split(row_segments, frame_width):
+    """Reject tiny/short mask gaps; they are noise, not a road junction."""
+    min_gap = max(16, round(frame_width * .04))
+    min_branch_width = max(20, round(frame_width * .06))
+    longest = current = 0
+    for spans in row_segments:
+        is_split = any(
+            right_left - left_right >= min_gap
+            and left_right - left_left >= min_branch_width
+            and right_right - right_left >= min_branch_width
+            for (left_left, left_right), (right_left, right_right) in zip(spans, spans[1:])
+        )
+        current = current + 1 if is_split else 0
+        longest = max(longest, current)
+    # A genuine fork remains visible across multiple adjacent image rows.
+    return longest >= max(12, len(row_segments) // 30)
+
+
 def _skeletonize(mask):
     """OpenCV-only morphological skeleton; operates on a reduced mask."""
     image = mask.copy()
@@ -123,7 +141,7 @@ def unified_center_mask(road, center_share):
     # A wide bend still has one continuous road span per row. Morphological
     # skeletons create harmless-looking but wrong side spurs on such shapes;
     # use the stable scanline center unless a real split is observed.
-    if max((len(spans) for spans in row_segments), default=0) <= 1:
+    if not _has_persistent_split(row_segments, road.shape[1]):
         return _row_center_mask(road, center_share)
     virtual, pad = _virtual_road(road)
     # Geometry at a bounded resolution keeps this step suitable for live CPU use.
