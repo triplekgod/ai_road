@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from collections import deque
 import cv2
 import numpy as np
 
@@ -135,14 +136,50 @@ def _skeletonize(mask):
     return skeleton
 
 
+def _longest_skeleton_path(skeleton):
+    """Keep the longitudinal path of a non-branching road skeleton only."""
+    binary = (skeleton > 0).astype(np.uint8)
+    neighbours = cv2.filter2D(binary, cv2.CV_16S, np.ones((3, 3), dtype=np.uint8)) - binary
+    endpoints = np.argwhere((binary > 0) & (neighbours == 1))
+    if len(endpoints) < 2:
+        return skeleton
+
+    def farthest(start, store_parent=False):
+        distance = np.full(binary.shape, -1, dtype=np.int32)
+        parent_y = np.full(binary.shape, -1, dtype=np.int16) if store_parent else None
+        parent_x = np.full(binary.shape, -1, dtype=np.int16) if store_parent else None
+        queue = deque([start]); distance[start] = 0
+        last = start
+        while queue:
+            y, x = queue.popleft(); last = (y, x)
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    if not dy and not dx: continue
+                    ny, nx = y + dy, x + dx
+                    if 0 <= ny < binary.shape[0] and 0 <= nx < binary.shape[1] and binary[ny, nx] and distance[ny, nx] < 0:
+                        distance[ny, nx] = distance[y, x] + 1
+                        if store_parent: parent_y[ny, nx], parent_x[ny, nx] = y, x
+                        queue.append((ny, nx))
+        reachable = [tuple(point) for point in endpoints if distance[tuple(point)] >= 0]
+        target = max(reachable, key=lambda point: distance[point]) if reachable else last
+        return target, parent_y, parent_x
+
+    first, _, _ = farthest(tuple(endpoints[0]))
+    last, parent_y, parent_x = farthest(first, store_parent=True)
+    path = np.zeros_like(skeleton)
+    point = last
+    while point != first:
+        path[point] = 255
+        point = (int(parent_y[point]), int(parent_x[point]))
+        if point[0] < 0: return skeleton  # defensive fallback for a malformed graph
+    path[first] = 255
+    return path
+
+
 def unified_center_mask(road, center_share):
     """Create one center-zone tree that follows the road and all its branches."""
     row_segments = [_row_segments(road[y]) for y in range(road.shape[0])]
-    # A wide bend still has one continuous road span per row. Morphological
-    # skeletons create harmless-looking but wrong side spurs on such shapes;
-    # use the stable scanline center unless a real split is observed.
-    if not _has_persistent_split(row_segments, road.shape[1]):
-        return _row_center_mask(road, center_share)
+    has_real_split = _has_persistent_split(row_segments, road.shape[1])
     virtual, pad = _virtual_road(road)
     # Geometry at a bounded resolution keeps this step suitable for live CPU use.
     scale = min(1.0, 960.0 / virtual.shape[1])
@@ -150,6 +187,8 @@ def unified_center_mask(road, center_share):
     work = cv2.resize(virtual, work_size, interpolation=cv2.INTER_NEAREST)
     skeleton = _skeletonize(work)
     if not cv2.countNonZero(skeleton): return np.zeros_like(road)
+    if not has_real_split:
+        skeleton = _longest_skeleton_path(skeleton)
     edge_distance = cv2.distanceTransform(work, cv2.DIST_L2, 3)
     seed = np.full_like(work, 255); seed[skeleton > 0] = 0
     center_distance = cv2.distanceTransform(seed, cv2.DIST_L2, 3)
