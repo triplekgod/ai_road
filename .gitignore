@@ -4,3 +4,4 @@ __pycache__/
 venv/
 *.pth
 *.mp4
+crossroad_test_result.png
