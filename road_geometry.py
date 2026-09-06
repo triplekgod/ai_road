@@ -200,7 +200,14 @@ def unified_center_mask(road, center_share):
     crop_end = round((pad + road.shape[1]) * work.shape[1] / virtual.shape[1])
     cropped = center[:, crop_start:crop_end].astype(np.uint8) * 255
     result = cv2.resize(cropped, (road.shape[1], road.shape[0]), interpolation=cv2.INTER_NEAREST)
-    return cv2.bitwise_and(result, road)
+    result = cv2.bitwise_and(result, road)
+    # Virtual edge extension can make a longest skeleton path live mostly
+    # outside the visible image. Never allow that degenerate path to erase
+    # the configured central zone from the actual road.
+    expected_center_pixels = cv2.countNonZero(road) * center_share
+    if cv2.countNonZero(result) < expected_center_pixels * .45:
+        return _row_center_mask(road, center_share)
+    return result
 
 
 def zone_mask(road, zones: Zones):
