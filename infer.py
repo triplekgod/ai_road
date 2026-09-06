@@ -38,14 +38,22 @@ def main():
     a = p.parse_args(); analyzer = RoadAnalyzer(a.model, a.threshold, Zones(a.left, a.center, a.right))
     cap = cv2.VideoCapture(a.video)
     if not cap.isOpened(): raise FileNotFoundError(a.video)
-    fps = cap.get(cv2.CAP_PROP_FPS) or 25; w, h = int(cap.get(3)), int(cap.get(4))
-    out = cv2.VideoWriter(a.output, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h)) if a.output else None
+    source_fps = cap.get(cv2.CAP_PROP_FPS)
+    if source_fps <= 0:
+        raise ValueError("Cannot determine source video FPS; output would not preserve it")
+    w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    out = cv2.VideoWriter(a.output, cv2.VideoWriter_fourcc(*"mp4v"), source_fps, (w, h)) if a.output else None
+    if out is not None and not out.isOpened():
+        cap.release()
+        raise IOError(f"Cannot create output video: {a.output}")
+    print(f"Source: {w}x{h}, {source_fps:.3f} FPS. Output FPS is preserved.")
     frames = 0; start = time.perf_counter()
     while True:
         ok, frame = cap.read()
         if not ok: break
         result, _ = analyzer.analyze(frame); frames += 1
-        cv2.putText(result, f"{frames / (time.perf_counter()-start):.1f} FPS", (12, 30), cv2.FONT_HERSHEY_SIMPLEX, .7, (255,255,255), 2)
+        processing_fps = frames / (time.perf_counter() - start)
+        cv2.putText(result, f"Processing: {processing_fps:.1f} FPS", (12, 30), cv2.FONT_HERSHEY_SIMPLEX, .7, (255,255,255), 2)
         if out: out.write(result)
         if not a.no_display:
             cv2.imshow("Quarry road", result)
