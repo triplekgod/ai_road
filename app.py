@@ -79,7 +79,6 @@ def menu():
         "3": ("Обучить новую модель", lambda: train(False)),
         "4": ("Дообучить существующую модель", lambda: train(True)),
         "5": ("Обработать видео", infer),
-        "6": ("Проверить геометрию перекрёстков", lambda: run("-m", ["unittest", "tests/test_road_geometry.py"])),
     }
     while True:
         print("\n" + "=" * 52 + "\n  АНАЛИЗ КАРЬЕРНОЙ ДОРОГИ\n" + "=" * 52)
