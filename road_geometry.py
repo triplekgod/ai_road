@@ -42,6 +42,26 @@ def _row_segments(row):
     return [(int(group[0]), int(group[-1]) + 1) for group in groups]
 
 
+def _estimated_full_width(segments_by_row, y, anchor, edge, visible_width, frame_width):
+    """Estimate a clipped branch width from the closest fully visible branch."""
+    candidates = []
+    search_radius = min(100, len(segments_by_row) - 1)
+    for candidate_y in range(max(0, y - search_radius), min(len(segments_by_row), y + search_radius + 1)):
+        for left, right in segments_by_row[candidate_y]:
+            if left == 0 or right == frame_width:  # this sample is clipped too
+                continue
+            reference_edge = right if edge == "left" else left
+            # Prefer a nearby row whose visible edge lies on the same branch.
+            score = 3 * abs(candidate_y - y) + abs(reference_edge - anchor)
+            candidates.append((score, right - left))
+    if candidates:
+        width = min(candidates, key=lambda item: item[0])[1]
+        return max(visible_width, width)
+    # No full sample exists: extrapolate conservatively instead of treating
+    # the image edge as a real road boundary.
+    return max(visible_width, int(visible_width * 1.5), 32)
+
+
 def zone_mask(road, zones: Zones):
     """Split every visible road branch independently into three colored zones.
 
@@ -49,14 +69,35 @@ def zone_mask(road, zones: Zones):
     scanline. Treating its outermost pixels as one span painted the empty gap
     and produced wrong zones. Each span is now handled as its own branch.
     """
-    output = np.zeros((*road.shape, 3), dtype=np.uint8)
-    for y in range(road.shape[0]):
-        for left, right in _row_segments(road[y]):
-            width = right - left
-            a, b = left + round(width * zones.left), right - round(width * zones.right)
-            output[y, left:a] = (0, 255, 255)  # yellow BGR
-            output[y, a:b] = (0, 255, 0)       # green BGR
-            output[y, b:right] = (0, 255, 255)
+    height, frame_width = road.shape
+    output = np.zeros((height, frame_width, 3), dtype=np.uint8)
+    segments_by_row = [_row_segments(road[y]) for y in range(height)]
+    for y, segments in enumerate(segments_by_row):
+        for left, right in segments:
+            visible_width = right - left
+            clipped_left, clipped_right = left == 0, right == frame_width
+            virtual_left, virtual_right = left, right
+            if clipped_left and not clipped_right:
+                width = _estimated_full_width(segments_by_row, y, right, "left", visible_width, frame_width)
+                virtual_left = right - width
+            elif clipped_right and not clipped_left:
+                width = _estimated_full_width(segments_by_row, y, left, "right", visible_width, frame_width)
+                virtual_right = left + width
+            # If both sides are clipped, the road is wider than the frame and
+            # its true center is unknowable from one image; retain the visible
+            # center rather than invent an asymmetric shift.
+            width = virtual_right - virtual_left
+            a = virtual_left + round(width * zones.left)
+            b = virtual_right - round(width * zones.right)
+            # Paint only the part inside the actual image, but calculate all
+            # boundaries in the extrapolated (virtual) road interval.
+            for start, end, color in ((virtual_left, a, (0, 255, 255)),
+                                      (a, b, (0, 255, 0)),
+                                      (b, virtual_right, (0, 255, 255))):
+                start = max(0, left, start)
+                end = min(frame_width, right, end)
+                if start < end:
+                    output[y, start:end] = color
     return output
 
 
