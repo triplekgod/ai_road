@@ -62,6 +62,61 @@ def _estimated_full_width(segments_by_row, y, anchor, edge, visible_width, frame
     return max(visible_width, int(visible_width * 1.5), 32)
 
 
+def _virtual_road(road):
+    """Extend one-sided clipped spans outside the image before geometry work."""
+    height, frame_width = road.shape
+    pad = frame_width
+    virtual = np.zeros((height, frame_width + 2 * pad), dtype=np.uint8)
+    segments_by_row = [_row_segments(road[y]) for y in range(height)]
+    for y, segments in enumerate(segments_by_row):
+        for left, right in segments:
+            visible_width = right - left
+            virtual_left, virtual_right = left, right
+            if left == 0 and right != frame_width:
+                virtual_left = right - _estimated_full_width(segments_by_row, y, right, "left", visible_width, frame_width)
+            elif right == frame_width and left != 0:
+                virtual_right = left + _estimated_full_width(segments_by_row, y, left, "right", visible_width, frame_width)
+            start, end = max(0, virtual_left + pad), min(virtual.shape[1], virtual_right + pad)
+            if start < end: virtual[y, start:end] = 255
+    return virtual, pad
+
+
+def _skeletonize(mask):
+    """OpenCV-only morphological skeleton; operates on a reduced mask."""
+    image = mask.copy()
+    skeleton = np.zeros_like(image)
+    element = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+    while cv2.countNonZero(image):
+        eroded = cv2.erode(image, element)
+        edge = cv2.subtract(image, cv2.dilate(eroded, element))
+        skeleton = cv2.bitwise_or(skeleton, edge)
+        image = eroded
+    return skeleton
+
+
+def unified_center_mask(road, center_share):
+    """Create one center-zone tree that follows the road and all its branches."""
+    virtual, pad = _virtual_road(road)
+    # Geometry at a bounded resolution keeps this step suitable for live CPU use.
+    scale = min(1.0, 960.0 / virtual.shape[1])
+    work_size = (max(1, round(virtual.shape[1] * scale)), max(1, round(virtual.shape[0] * scale)))
+    work = cv2.resize(virtual, work_size, interpolation=cv2.INTER_NEAREST)
+    skeleton = _skeletonize(work)
+    if not cv2.countNonZero(skeleton): return np.zeros_like(road)
+    edge_distance = cv2.distanceTransform(work, cv2.DIST_L2, 3)
+    seed = np.full_like(work, 255); seed[skeleton > 0] = 0
+    center_distance = cv2.distanceTransform(seed, cv2.DIST_L2, 3)
+    # For a strip: radius = distance-to-edge + distance-to-skeleton. This
+    # selects exactly `center_share` of the local width and follows a fork.
+    center = ((1.0 - center_share) * center_distance <= center_share * edge_distance)
+    center &= work > 0
+    crop_start = round(pad * work.shape[1] / virtual.shape[1])
+    crop_end = round((pad + road.shape[1]) * work.shape[1] / virtual.shape[1])
+    cropped = center[:, crop_start:crop_end].astype(np.uint8) * 255
+    result = cv2.resize(cropped, (road.shape[1], road.shape[0]), interpolation=cv2.INTER_NEAREST)
+    return cv2.bitwise_and(result, road)
+
+
 def zone_mask(road, zones: Zones):
     """Split every visible road branch independently into three colored zones.
 
@@ -69,35 +124,9 @@ def zone_mask(road, zones: Zones):
     scanline. Treating its outermost pixels as one span painted the empty gap
     and produced wrong zones. Each span is now handled as its own branch.
     """
-    height, frame_width = road.shape
-    output = np.zeros((height, frame_width, 3), dtype=np.uint8)
-    segments_by_row = [_row_segments(road[y]) for y in range(height)]
-    for y, segments in enumerate(segments_by_row):
-        for left, right in segments:
-            visible_width = right - left
-            clipped_left, clipped_right = left == 0, right == frame_width
-            virtual_left, virtual_right = left, right
-            if clipped_left and not clipped_right:
-                width = _estimated_full_width(segments_by_row, y, right, "left", visible_width, frame_width)
-                virtual_left = right - width
-            elif clipped_right and not clipped_left:
-                width = _estimated_full_width(segments_by_row, y, left, "right", visible_width, frame_width)
-                virtual_right = left + width
-            # If both sides are clipped, the road is wider than the frame and
-            # its true center is unknowable from one image; retain the visible
-            # center rather than invent an asymmetric shift.
-            width = virtual_right - virtual_left
-            a = virtual_left + round(width * zones.left)
-            b = virtual_right - round(width * zones.right)
-            # Paint only the part inside the actual image, but calculate all
-            # boundaries in the extrapolated (virtual) road interval.
-            for start, end, color in ((virtual_left, a, (0, 255, 255)),
-                                      (a, b, (0, 255, 0)),
-                                      (b, virtual_right, (0, 255, 255))):
-                start = max(0, left, start)
-                end = min(frame_width, right, end)
-                if start < end:
-                    output[y, start:end] = color
+    output = np.zeros((*road.shape, 3), dtype=np.uint8)
+    output[road > 0] = (0, 255, 255)  # both side zones are yellow
+    output[unified_center_mask(road, zones.center) > 0] = (0, 255, 0)
     return output
 
 
