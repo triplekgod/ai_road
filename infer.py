@@ -1,5 +1,6 @@
 import argparse
 import time
+from collections import deque
 import cv2
 import numpy as np
 import torch
@@ -8,11 +9,22 @@ from road_geometry import Zones, draw_zone_outlines, primary_road, smooth_road_m
 
 
 class RoadAnalyzer:
-    def __init__(self, checkpoint, threshold=.55, zones=Zones(), device=None):
+    def __init__(self, checkpoint, threshold=.55, zones=Zones(), temporal_window=5, min_confirmed_frames=4, device=None):
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         data = torch.load(checkpoint, map_location=self.device, weights_only=True)
         self.size = data.get("image_size", 192); self.threshold, self.zones = threshold, zones
         self.model = LiteRoadNet().to(self.device); self.model.load_state_dict(data["model"]); self.model.eval()
+        if not 1 <= min_confirmed_frames <= temporal_window:
+            raise ValueError("min_confirmed_frames must be between 1 and temporal_window")
+        self.temporal_window = temporal_window
+        self.min_confirmed_frames = min_confirmed_frames
+        self.mask_history = deque(maxlen=temporal_window)
+
+    def stable_mask(self, current):
+        """Keep a pixel only if it is confirmed by recent frames and current."""
+        self.mask_history.append(current > 0)
+        votes = np.sum(self.mask_history, axis=0)
+        return np.where((current > 0) & (votes >= self.min_confirmed_frames), 255, 0).astype(np.uint8)
 
     @torch.inference_mode()
     def analyze(self, frame):
@@ -21,7 +33,10 @@ class RoadAnalyzer:
         small = cv2.resize(rgb, (self.size, self.size), interpolation=cv2.INTER_LINEAR)
         tensor = torch.from_numpy(small).permute(2, 0, 1).unsqueeze(0).float().div_(255).to(self.device)
         prob = self.model(tensor).sigmoid()[0, 0].cpu().numpy()
-        raw = cv2.resize((prob >= self.threshold).astype(np.uint8) * 255, (w, h), interpolation=cv2.INTER_NEAREST)
+        # Temporal voting happens at model resolution: it is inexpensive and
+        # rejects short-lived false detections without changing output FPS.
+        stable_small = self.stable_mask((prob >= self.threshold).astype(np.uint8) * 255)
+        raw = cv2.resize(stable_small, (w, h), interpolation=cv2.INTER_NEAREST)
         road = smooth_road_mask(primary_road(raw, min_area=max(300, w * h // 700)))
         overlay = np.zeros_like(frame); overlay[road == 0] = (0, 0, 255)  # off-road red
         zones = draw_zone_outlines(zone_mask(road, self.zones), road)
@@ -34,8 +49,10 @@ def main():
     p.add_argument("video"); p.add_argument("model"); p.add_argument("--output")
     p.add_argument("--threshold", type=float, default=.55); p.add_argument("--left", type=float, default=.15)
     p.add_argument("--center", type=float, default=.70); p.add_argument("--right", type=float, default=.15)
+    p.add_argument("--temporal-window", type=int, default=5, help="number of recent masks to compare")
+    p.add_argument("--min-confirmed-frames", type=int, default=4, help="votes required for a road pixel")
     p.add_argument("--no-display", action="store_true")
-    a = p.parse_args(); analyzer = RoadAnalyzer(a.model, a.threshold, Zones(a.left, a.center, a.right))
+    a = p.parse_args(); analyzer = RoadAnalyzer(a.model, a.threshold, Zones(a.left, a.center, a.right), a.temporal_window, a.min_confirmed_frames)
     cap = cv2.VideoCapture(a.video)
     if not cap.isOpened(): raise FileNotFoundError(a.video)
     source_fps = cap.get(cv2.CAP_PROP_FPS)

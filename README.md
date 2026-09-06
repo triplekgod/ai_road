@@ -44,17 +44,17 @@ C:\data\road\masks\frame_000000_mask.bmp
 ### 2. Обучение с нуля
 
 ```powershell
-python train.py C:\data\road\images C:\data\road\masks --epochs 50 --batch-size 16 --size 192 --output C:\data\models\lite_road_model.pth
+python train.py C:\data\road\train_images C:\data\road\train_masks --val-images-dir C:\data\road\val_images --val-masks-dir C:\data\road\val_masks --epochs 50 --batch-size 16 --size 192 --output C:\data\models\lite_road_model.pth
 ```
 
-Если на устройстве не хватает памяти, уменьшите `--batch-size` до `8` или `4`. `--size 192` — стартовый вариант для CPU; для более точной, но медленной модели можно выбрать `256`.
+Не берите соседние кадры одного видео одновременно в train и validation: это создаёт иллюзию хорошего качества. Разделяйте по роликам/сменам: примерно 80% видео — `train`, 20% других видео — `val`. Если папки validation не заданы, программа делит кадры случайно, но это только запасной вариант. Если на устройстве не хватает памяти, уменьшите `--batch-size` до `8` или `4`. `--size 192` — стартовый вариант для CPU; для более точной, но медленной модели можно выбрать `256`.
 
 ### 3. Дообучение на новых ошибочных кадрах
 
-Соберите и разметьте новые кадры, затем продолжите обучение. Разрешение `--size` должно быть таким же, как у исходной модели.
+Соберите и разметьте новые кадры, затем продолжите обучение. В новые данные обязательно включите ложные срабатывания: кадры с отвалами, камнями, тенями, кабиной, небом и участками без дороги размечайте полностью чёрной маской. Не обучайте модель только на новых ошибочных кадрах: объедините прежние и новые пары в общие `train_images/train_masks`, иначе она забудет старые сцены. Разрешение `--size` должно быть таким же, как у исходной модели.
 
 ```powershell
-python train.py C:\data\new_images C:\data\new_masks --epochs 20 --batch-size 8 --size 192 --resume C:\data\models\lite_road_model.pth --output C:\data\models\lite_road_model_v2.pth
+python train.py C:\data\road\train_images C:\data\road\train_masks --val-images-dir C:\data\road\val_images --val-masks-dir C:\data\road\val_masks --epochs 20 --batch-size 8 --size 192 --resume C:\data\models\lite_road_model.pth --output C:\data\models\lite_road_model_v2.pth
 ```
 
 ### 4. Обработка видео
@@ -79,6 +79,16 @@ python infer.py C:\data\test_video.mp4 C:\data\models\lite_road_model.pth
 
 ```powershell
 python infer.py C:\data\test_video.mp4 C:\data\models\lite_road_model.pth --no-display --output C:\data\result\road_zones.mp4
+```
+
+Краткие ложные срабатывания подавляются по умолчанию: пиксель должен подтвердиться в 4 из последних 5 кадров. Для очень медленного движения можно усилить фильтр, для быстрых поворотов — ослабить:
+
+```powershell
+# сильнее подавлять краткие ошибки: нужно 5 подтверждений из 6
+python infer.py C:\data\test_video.mp4 C:\data\models\lite_road_model.pth --temporal-window 6 --min-confirmed-frames 5
+
+# быстрее реагировать на изменение дороги: 2 подтверждения из 3
+python infer.py C:\data\test_video.mp4 C:\data\models\lite_road_model.pth --temporal-window 3 --min-confirmed-frames 2
 ```
 
 Аргументы после `infer.py`: сначала путь к исходному видео, затем путь к файлу модели. Результат — MP4, где вне дороги красный цвет, края дороги жёлтые, а центральная безопасная зона зелёная. Центральная зона строится по скелету всей связной дороги: это одно дерево, которое начинается на основной дороге и разветвляется вместе с ней. Если граница дороги ушла за левый или правый край кадра, программа оценивает полную ширину по ближайшим полностью видимым строкам и рассчитывает центр в виртуально дополненном контуре. Белые линии показывают границы зон, синяя — внешний контур дороги. Маска также сглаживается от мелких зазубрин и шума.

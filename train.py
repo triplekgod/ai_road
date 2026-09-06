@@ -2,7 +2,7 @@ import argparse
 from pathlib import Path
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, Subset
 from dataset import RoadDataset
 from model import LiteRoadNet
 
@@ -17,14 +17,26 @@ def loss_fn(logits, target):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("images_dir"); p.add_argument("masks_dir")
+    p.add_argument("--val-images-dir", help="separate validation frames; recommended")
+    p.add_argument("--val-masks-dir", help="masks for --val-images-dir")
     p.add_argument("--epochs", type=int, default=50); p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--size", type=int, default=192); p.add_argument("--output", default="lite_road_model.pth")
     p.add_argument("--resume", help="Checkpoint from a previous training run for fine-tuning")
     args = p.parse_args()
+    if bool(args.val_images_dir) != bool(args.val_masks_dir):
+        raise ValueError("Provide both --val-images-dir and --val-masks-dir")
     dataset = RoadDataset(args.images_dir, args.masks_dir, args.size, augment=True)
-    if len(dataset) < 2: raise ValueError("Need at least two labeled frames")
-    n_train = max(1, int(.8 * len(dataset)))
-    train_set, valid_set = random_split(dataset, [n_train, len(dataset) - n_train])
+    if args.val_images_dir:
+        train_set = dataset
+        valid_set = RoadDataset(args.val_images_dir, args.val_masks_dir, args.size, augment=False)
+    else:
+        if len(dataset) < 2: raise ValueError("Need at least two labeled frames")
+        n_train = max(1, int(.8 * len(dataset)))
+        indices = torch.randperm(len(dataset)).tolist()
+        # Validation must not receive random training augmentation.
+        validation_data = RoadDataset(args.images_dir, args.masks_dir, args.size, augment=False)
+        train_set = Subset(dataset, indices[:n_train])
+        valid_set = Subset(validation_data, indices[n_train:])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = LiteRoadNet().to(device)
     if args.resume:
