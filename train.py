@@ -19,13 +19,21 @@ def main():
     p.add_argument("images_dir"); p.add_argument("masks_dir")
     p.add_argument("--epochs", type=int, default=50); p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--size", type=int, default=192); p.add_argument("--output", default="lite_road_model.pth")
+    p.add_argument("--resume", help="Checkpoint from a previous training run for fine-tuning")
     args = p.parse_args()
     dataset = RoadDataset(args.images_dir, args.masks_dir, args.size, augment=True)
     if len(dataset) < 2: raise ValueError("Need at least two labeled frames")
     n_train = max(1, int(.8 * len(dataset)))
     train_set, valid_set = random_split(dataset, [n_train, len(dataset) - n_train])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = LiteRoadNet().to(device); optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
+    model = LiteRoadNet().to(device)
+    if args.resume:
+        checkpoint = torch.load(args.resume, map_location=device, weights_only=True)
+        if checkpoint.get("image_size", args.size) != args.size:
+            raise ValueError("--size must match the checkpoint image_size")
+        model.load_state_dict(checkpoint["model"])
+        print(f"resumed from: {Path(args.resume).resolve()}")
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3 if not args.resume else 1e-4, weight_decay=1e-4)
     best = float("inf")
     for epoch in range(args.epochs):
         model.train(); total = 0.
