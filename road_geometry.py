@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from collections import deque
 import cv2
 import numpy as np
 
@@ -63,25 +62,6 @@ def _estimated_full_width(segments_by_row, y, anchor, edge, visible_width, frame
     return max(visible_width, int(visible_width * 1.5), 32)
 
 
-def _virtual_road(road):
-    """Extend one-sided clipped spans outside the image before geometry work."""
-    height, frame_width = road.shape
-    pad = frame_width
-    virtual = np.zeros((height, frame_width + 2 * pad), dtype=np.uint8)
-    segments_by_row = [_row_segments(road[y]) for y in range(height)]
-    for y, segments in enumerate(segments_by_row):
-        for left, right in segments:
-            visible_width = right - left
-            virtual_left, virtual_right = left, right
-            if left == 0 and right != frame_width:
-                virtual_left = right - _estimated_full_width(segments_by_row, y, right, "left", visible_width, frame_width)
-            elif right == frame_width and left != 0:
-                virtual_right = left + _estimated_full_width(segments_by_row, y, left, "right", visible_width, frame_width)
-            start, end = max(0, virtual_left + pad), min(virtual.shape[1], virtual_right + pad)
-            if start < end: virtual[y, start:end] = 255
-    return virtual, pad
-
-
 def _row_center_mask(road, center_share):
     """Stable center band for a road that does not actually split in a row."""
     height, frame_width = road.shape
@@ -123,91 +103,38 @@ def _has_persistent_split(row_segments, frame_width):
     return longest >= max(12, len(row_segments) // 30)
 
 
-def _skeletonize(mask):
-    """OpenCV-only morphological skeleton; operates on a reduced mask."""
-    image = mask.copy()
-    skeleton = np.zeros_like(image)
-    element = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
-    while cv2.countNonZero(image):
-        eroded = cv2.erode(image, element)
-        edge = cv2.subtract(image, cv2.dilate(eroded, element))
-        skeleton = cv2.bitwise_or(skeleton, edge)
-        image = eroded
-    return skeleton
-
-
-def _longest_skeleton_path(skeleton):
-    """Keep the longitudinal path of a non-branching road skeleton only."""
-    binary = (skeleton > 0).astype(np.uint8)
-    neighbours = cv2.filter2D(binary, cv2.CV_16S, np.ones((3, 3), dtype=np.uint8)) - binary
-    endpoints = np.argwhere((binary > 0) & (neighbours == 1))
-    if len(endpoints) < 2:
-        return skeleton
-
-    def farthest(start, store_parent=False):
-        distance = np.full(binary.shape, -1, dtype=np.int32)
-        parent_y = np.full(binary.shape, -1, dtype=np.int16) if store_parent else None
-        parent_x = np.full(binary.shape, -1, dtype=np.int16) if store_parent else None
-        queue = deque([start]); distance[start] = 0
-        last = start
-        while queue:
-            y, x = queue.popleft(); last = (y, x)
-            for dy in (-1, 0, 1):
-                for dx in (-1, 0, 1):
-                    if not dy and not dx: continue
-                    ny, nx = y + dy, x + dx
-                    if 0 <= ny < binary.shape[0] and 0 <= nx < binary.shape[1] and binary[ny, nx] and distance[ny, nx] < 0:
-                        distance[ny, nx] = distance[y, x] + 1
-                        if store_parent: parent_y[ny, nx], parent_x[ny, nx] = y, x
-                        queue.append((ny, nx))
-        reachable = [tuple(point) for point in endpoints if distance[tuple(point)] >= 0]
-        target = max(reachable, key=lambda point: distance[point]) if reachable else last
-        return target, parent_y, parent_x
-
-    first, _, _ = farthest(tuple(endpoints[0]))
-    last, parent_y, parent_x = farthest(first, store_parent=True)
-    path = np.zeros_like(skeleton)
-    point = last
-    while point != first:
-        path[point] = 255
-        point = (int(parent_y[point]), int(parent_x[point]))
-        if point[0] < 0: return skeleton  # defensive fallback for a malformed graph
-    path[first] = 255
-    return path
+def _connect_confirmed_branches(center, road):
+    """Bridge a main center band to branches only at a persistent split."""
+    segments = [_row_segments(road[y]) for y in range(road.shape[0])]
+    if not _has_persistent_split(segments, road.shape[1]):
+        return center
+    result = center.copy()
+    # Roads in this camera view originate near the bottom. For each split row,
+    # join a child center to the nearest one-piece parent directly below it.
+    for y, spans in enumerate(segments[:-1]):
+        if len(spans) < 2:
+            continue
+        # Only the final split row needs a connector. Connecting every row of
+        # a fork would paint a large triangular green wedge.
+        if len(segments[y + 1]) >= 2:
+            continue
+        parent_y = next((candidate for candidate in range(y + 1, min(len(segments), y + 80)) if len(segments[candidate]) == 1), None)
+        if parent_y is None:
+            continue
+        parent_left, parent_right = segments[parent_y][0]
+        parent_x = (parent_left + parent_right) // 2
+        for left, right in spans:
+            child_x = (left + right) // 2
+            connector = np.zeros_like(road)
+            thickness = max(3, round(min(right - left, parent_right - parent_left) * .12))
+            cv2.line(connector, (parent_x, parent_y), (child_x, y), 255, thickness, cv2.LINE_AA)
+            result = cv2.bitwise_or(result, cv2.bitwise_and(connector, road))
+    return result
 
 
 def unified_center_mask(road, center_share):
-    """Create one center-zone tree that follows the road and all its branches."""
-    row_segments = [_row_segments(road[y]) for y in range(road.shape[0])]
-    has_real_split = _has_persistent_split(row_segments, road.shape[1])
-    virtual, pad = _virtual_road(road)
-    # Geometry at a bounded resolution keeps this step suitable for live CPU use.
-    scale = min(1.0, 960.0 / virtual.shape[1])
-    work_size = (max(1, round(virtual.shape[1] * scale)), max(1, round(virtual.shape[0] * scale)))
-    work = cv2.resize(virtual, work_size, interpolation=cv2.INTER_NEAREST)
-    skeleton = _skeletonize(work)
-    if not cv2.countNonZero(skeleton): return np.zeros_like(road)
-    if not has_real_split:
-        skeleton = _longest_skeleton_path(skeleton)
-    edge_distance = cv2.distanceTransform(work, cv2.DIST_L2, 3)
-    seed = np.full_like(work, 255); seed[skeleton > 0] = 0
-    center_distance = cv2.distanceTransform(seed, cv2.DIST_L2, 3)
-    # For a strip: radius = distance-to-edge + distance-to-skeleton. This
-    # selects exactly `center_share` of the local width and follows a fork.
-    center = ((1.0 - center_share) * center_distance <= center_share * edge_distance)
-    center &= work > 0
-    crop_start = round(pad * work.shape[1] / virtual.shape[1])
-    crop_end = round((pad + road.shape[1]) * work.shape[1] / virtual.shape[1])
-    cropped = center[:, crop_start:crop_end].astype(np.uint8) * 255
-    result = cv2.resize(cropped, (road.shape[1], road.shape[0]), interpolation=cv2.INTER_NEAREST)
-    result = cv2.bitwise_and(result, road)
-    # Virtual edge extension can make a longest skeleton path live mostly
-    # outside the visible image. Never allow that degenerate path to erase
-    # the configured central zone from the actual road.
-    expected_center_pixels = cv2.countNonZero(road) * center_share
-    if cv2.countNonZero(result) < expected_center_pixels * .45:
-        return _row_center_mask(road, center_share)
-    return result
+    """Stable scanline center bands, with bridges only at confirmed forks."""
+    return _connect_confirmed_branches(_row_center_mask(road, center_share), road)
 
 
 def zone_mask(road, zones: Zones):
