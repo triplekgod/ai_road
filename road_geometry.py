@@ -81,6 +81,29 @@ def _virtual_road(road):
     return virtual, pad
 
 
+def _row_center_mask(road, center_share):
+    """Stable center band for a road that does not actually split in a row."""
+    height, frame_width = road.shape
+    result = np.zeros_like(road)
+    segments_by_row = [_row_segments(road[y]) for y in range(height)]
+    for y, segments in enumerate(segments_by_row):
+        for left, right in segments:
+            visible_width = right - left
+            virtual_left, virtual_right = left, right
+            if left == 0 and right != frame_width:
+                virtual_left = right - _estimated_full_width(segments_by_row, y, right, "left", visible_width, frame_width)
+            elif right == frame_width and left != 0:
+                virtual_right = left + _estimated_full_width(segments_by_row, y, left, "right", visible_width, frame_width)
+            width = virtual_right - virtual_left
+            # center_share is symmetric around the road axis; side colors are
+            # identical, so only this interval needs to be materialized.
+            start = virtual_left + round(width * (1.0 - center_share) / 2.0)
+            end = virtual_right - round(width * (1.0 - center_share) / 2.0)
+            start, end = max(left, start, 0), min(right, end, frame_width)
+            if start < end: result[y, start:end] = 255
+    return result
+
+
 def _skeletonize(mask):
     """OpenCV-only morphological skeleton; operates on a reduced mask."""
     image = mask.copy()
@@ -96,6 +119,12 @@ def _skeletonize(mask):
 
 def unified_center_mask(road, center_share):
     """Create one center-zone tree that follows the road and all its branches."""
+    row_segments = [_row_segments(road[y]) for y in range(road.shape[0])]
+    # A wide bend still has one continuous road span per row. Morphological
+    # skeletons create harmless-looking but wrong side spurs on such shapes;
+    # use the stable scanline center unless a real split is observed.
+    if max((len(spans) for spans in row_segments), default=0) <= 1:
+        return _row_center_mask(road, center_share)
     virtual, pad = _virtual_road(road)
     # Geometry at a bounded resolution keeps this step suitable for live CPU use.
     scale = min(1.0, 960.0 / virtual.shape[1])
