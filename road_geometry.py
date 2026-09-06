@@ -33,16 +33,47 @@ def primary_road(binary_mask, bottom_fraction=.42, min_area=500):
     return np.where(labels == label, 255, 0).astype(np.uint8)
 
 
+def _row_segments(row):
+    """Return separate filled road spans in a row; gaps are branch separators."""
+    indices = np.flatnonzero(row)
+    if not len(indices): return []
+    breaks = np.flatnonzero(np.diff(indices) > 1) + 1
+    groups = np.split(indices, breaks)
+    return [(int(group[0]), int(group[-1]) + 1) for group in groups]
+
+
 def zone_mask(road, zones: Zones):
-    """Split each road row directly; no costly row-segment grouping/polygon reconstruction."""
+    """Split every visible road branch independently into three colored zones.
+
+    A connected road component may split into two or more disjoint spans on a
+    scanline. Treating its outermost pixels as one span painted the empty gap
+    and produced wrong zones. Each span is now handled as its own branch.
+    """
     output = np.zeros((*road.shape, 3), dtype=np.uint8)
     for y in range(road.shape[0]):
-        xs = np.flatnonzero(road[y])
-        if not len(xs): continue
-        left, right = xs[0], xs[-1] + 1
-        width = right - left
-        a, b = left + round(width * zones.left), right - round(width * zones.right)
-        output[y, left:a] = (0, 255, 255)  # yellow BGR
-        output[y, a:b] = (0, 255, 0)       # green BGR
-        output[y, b:right] = (0, 255, 255)
+        for left, right in _row_segments(road[y]):
+            width = right - left
+            a, b = left + round(width * zones.left), right - round(width * zones.right)
+            output[y, left:a] = (0, 255, 255)  # yellow BGR
+            output[y, a:b] = (0, 255, 0)       # green BGR
+            output[y, b:right] = (0, 255, 255)
     return output
+
+
+def smooth_road_mask(mask):
+    """Remove one-pixel noise and soften jagged segmentation edges cheaply."""
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    smoothed = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+    return cv2.morphologyEx(smoothed, cv2.MORPH_OPEN, kernel, iterations=1)
+
+
+def draw_zone_outlines(colored_zones, road):
+    """Draw a dark outer road contour and white borders between visible zones."""
+    result = colored_zones.copy()
+    contours, _ = cv2.findContours(road, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cv2.drawContours(result, contours, -1, (255, 80, 0), 2, cv2.LINE_AA)
+    for color in ((0, 255, 255), (0, 255, 0)):
+        pixels = cv2.inRange(colored_zones, np.array(color), np.array(color))
+        contours, _ = cv2.findContours(pixels, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(result, contours, -1, (255, 255, 255), 1, cv2.LINE_AA)
+    return result

@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import torch
 from model import LiteRoadNet
-from road_geometry import Zones, primary_road, zone_mask
+from road_geometry import Zones, draw_zone_outlines, primary_road, smooth_road_mask, zone_mask
 
 
 class RoadAnalyzer:
@@ -22,9 +22,9 @@ class RoadAnalyzer:
         tensor = torch.from_numpy(small).permute(2, 0, 1).unsqueeze(0).float().div_(255).to(self.device)
         prob = self.model(tensor).sigmoid()[0, 0].cpu().numpy()
         raw = cv2.resize((prob >= self.threshold).astype(np.uint8) * 255, (w, h), interpolation=cv2.INTER_NEAREST)
-        road = primary_road(raw, min_area=max(300, w * h // 700))
+        road = smooth_road_mask(primary_road(raw, min_area=max(300, w * h // 700)))
         overlay = np.zeros_like(frame); overlay[road == 0] = (0, 0, 255)  # off-road red
-        zones = zone_mask(road, self.zones)
+        zones = draw_zone_outlines(zone_mask(road, self.zones), road)
         overlay[road > 0] = zones[road > 0]
         return cv2.addWeighted(frame, .55, overlay, .45, 0), road
 
