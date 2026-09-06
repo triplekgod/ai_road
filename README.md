@@ -59,15 +59,29 @@ python train.py C:\data\new_images C:\data\new_masks --epochs 20 --batch-size 8 
 
 ### 4. Обработка видео
 
-```powershell
-python infer.py C:\data\test_video.mp4 C:\data\models\lite_road_model.pth --output C:\data\result.mp4 --left 0.15 --center 0.70 --right 0.15
-```
-
-Чтобы посмотреть обработку без сохранения файла, уберите `--output`. Для запуска без окна просмотра (например, на сервере) добавьте `--no-display`:
+Сначала убедитесь, что есть обученная модель (`lite_road_model.pth`) и создайте папку для результата. В окне результата показывается текущий FPS; нажмите `q`, чтобы остановить обработку раньше конца видео.
 
 ```powershell
-python infer.py C:\data\test_video.mp4 C:\data\models\lite_road_model.pth --no-display --output C:\data\result.mp4
+# создать папку для результата, если её ещё нет
+New-Item -ItemType Directory -Force C:\data\result
+
+# обработать видео, показать окно и сохранить размеченный ролик
+python infer.py C:\data\test_video.mp4 C:\data\models\lite_road_model.pth --output C:\data\result\road_zones.mp4 --left 0.15 --center 0.70 --right 0.15
 ```
+
+Только посмотреть разметку в реальном времени, без записи файла:
+
+```powershell
+python infer.py C:\data\test_video.mp4 C:\data\models\lite_road_model.pth
+```
+
+Обработать и записать видео без окна просмотра (например, на сервере или при пакетной обработке):
+
+```powershell
+python infer.py C:\data\test_video.mp4 C:\data\models\lite_road_model.pth --no-display --output C:\data\result\road_zones.mp4
+```
+
+Аргументы после `infer.py`: сначала путь к исходному видео, затем путь к файлу модели. Результат — MP4, где вне дороги красный цвет, края дороги жёлтые, а центральная безопасная зона зелёная.
 
 ### 5. Настройка зон и чувствительности
 
