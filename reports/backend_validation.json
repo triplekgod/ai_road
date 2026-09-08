@@ -1,0 +1,164 @@
+{
+  "scope": "Toolchain integration only: untrained random weights and synthetic images. No road accuracy or target CPU speed acceptance.",
+  "environment": {
+    "python": "3.12.14",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "AMD64 Family 25 Model 33 Stepping 2, AuthenticAMD",
+    "torch": "2.14.0+cpu",
+    "numpy": "2.5.3",
+    "opencv": "5.0.0",
+    "onnx": "1.22.0",
+    "onnxruntime": "1.29.0",
+    "openvino": "2026.3.1-22476-759c5a6ab8c-releases/2026/3"
+  },
+  "models": {
+    "lite_road_net": {
+      "export": {
+        "architecture": "lite_road_net",
+        "parameters": 19233,
+        "input_shape": [
+          1,
+          3,
+          144,
+          256
+        ],
+        "output": "validation_artifacts/backend_validation\\lite_road_net.onnx",
+        "model_bytes": 101751,
+        "data": "image_frames",
+        "parity": {
+          "frames": 5,
+          "max_absolute_error": 8.940696716308594e-08,
+          "mean_absolute_error": 4.158614008709094e-10,
+          "within_tolerance": true,
+          "absolute_tolerance": 1e-05,
+          "relative_tolerance": 0.0001,
+          "backend": "onnxruntime"
+        }
+      },
+      "openvino_fp32_parity": {
+        "frames": 5,
+        "max_absolute_error": 8.940696716308594e-08,
+        "mean_absolute_error": 3.7786472839584916e-10,
+        "within_tolerance": true,
+        "absolute_tolerance": 1e-05,
+        "relative_tolerance": 0.0001
+      },
+      "quantization": {
+        "input": "validation_artifacts/backend_validation\\lite_road_net.onnx",
+        "output": "validation_artifacts/backend_validation\\lite_road_net.int8.onnx",
+        "fp32_bytes": 101751,
+        "int8_bytes": 99342,
+        "calibration": {
+          "split": "train",
+          "count": 200,
+          "seed": 42,
+          "groups": [
+            "train"
+          ],
+          "dataset_fingerprint": "cccd617d54464b3a63b2c0b2035282aad67182136d7497845ff95ec76c60c8b2"
+        },
+        "calibration_manifest_sha256": "d817efd8f0f1e2ebd0ac14fa2f19b107103d5e9d38ec541e5cde55657b8f95f5",
+        "calibration_probability_drift": {
+          "frames": 200,
+          "max_absolute_error": 0.000615239143371582,
+          "mean_absolute_error": 4.81711070460733e-05,
+          "within_tolerance": false,
+          "absolute_tolerance": 1e-05,
+          "relative_tolerance": 0.0001
+        },
+        "acceptance": "pending independent test IoU/Boundary IoU and target-CPU benchmark",
+        "qat_gate": "If test Road IoU decreases by more than 0.02 absolute, reject PTQ and train with QAT."
+      },
+      "int8_onnx_vs_openvino": {
+        "frames": 5,
+        "max_absolute_error": 0.0006221532821655273,
+        "mean_absolute_error": 5.668583617080003e-05,
+        "within_tolerance": false,
+        "absolute_tolerance": 1e-05,
+        "relative_tolerance": 0.0001
+      },
+      "fp32_vs_int8_test_numerical_drift": {
+        "frames": 5,
+        "max_absolute_error": 0.00048020482063293457,
+        "mean_absolute_error": 4.8116719699464736e-05,
+        "within_tolerance": false,
+        "absolute_tolerance": 1e-05,
+        "relative_tolerance": 0.0001
+      }
+    },
+    "fast_scnn_lite": {
+      "export": {
+        "architecture": "fast_scnn_lite",
+        "parameters": 359153,
+        "input_shape": [
+          1,
+          3,
+          144,
+          256
+        ],
+        "output": "validation_artifacts/backend_validation\\fast_scnn_lite.onnx",
+        "model_bytes": 1451254,
+        "data": "image_frames",
+        "parity": {
+          "frames": 5,
+          "max_absolute_error": 1.1920928955078125e-07,
+          "mean_absolute_error": 1.043857378313362e-09,
+          "within_tolerance": true,
+          "absolute_tolerance": 1e-05,
+          "relative_tolerance": 0.0001,
+          "backend": "onnxruntime"
+        }
+      },
+      "openvino_fp32_parity": {
+        "frames": 5,
+        "max_absolute_error": 1.1920928955078125e-07,
+        "mean_absolute_error": 1.0060223987196081e-09,
+        "within_tolerance": true,
+        "absolute_tolerance": 1e-05,
+        "relative_tolerance": 0.0001
+      },
+      "quantization": {
+        "input": "validation_artifacts/backend_validation\\fast_scnn_lite.onnx",
+        "output": "validation_artifacts/backend_validation\\fast_scnn_lite.int8.onnx",
+        "fp32_bytes": 1451254,
+        "int8_bytes": 540439,
+        "calibration": {
+          "split": "train",
+          "count": 200,
+          "seed": 42,
+          "groups": [
+            "train"
+          ],
+          "dataset_fingerprint": "cccd617d54464b3a63b2c0b2035282aad67182136d7497845ff95ec76c60c8b2"
+        },
+        "calibration_manifest_sha256": "d817efd8f0f1e2ebd0ac14fa2f19b107103d5e9d38ec541e5cde55657b8f95f5",
+        "calibration_probability_drift": {
+          "frames": 200,
+          "max_absolute_error": 3.349781036376953e-05,
+          "mean_absolute_error": 1.2752301436194103e-05,
+          "within_tolerance": true,
+          "absolute_tolerance": 1e-05,
+          "relative_tolerance": 0.0001
+        },
+        "acceptance": "pending independent test IoU/Boundary IoU and target-CPU benchmark",
+        "qat_gate": "If test Road IoU decreases by more than 0.02 absolute, reject PTQ and train with QAT."
+      },
+      "int8_onnx_vs_openvino": {
+        "frames": 5,
+        "max_absolute_error": 0.0,
+        "mean_absolute_error": 0.0,
+        "within_tolerance": true,
+        "absolute_tolerance": 1e-05,
+        "relative_tolerance": 0.0001
+      },
+      "fp32_vs_int8_test_numerical_drift": {
+        "frames": 5,
+        "max_absolute_error": 3.325939178466797e-05,
+        "mean_absolute_error": 1.282926277781371e-05,
+        "within_tolerance": true,
+        "absolute_tolerance": 1e-05,
+        "relative_tolerance": 0.0001
+      }
+    }
+  }
+}

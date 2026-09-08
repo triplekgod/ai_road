@@ -1,0 +1,56 @@
+[
+  {
+    "script": "prepare.py",
+    "exit_code": 0,
+    "has_usage": true,
+    "stderr": ""
+  },
+  {
+    "script": "annotate.py",
+    "exit_code": 0,
+    "has_usage": true,
+    "stderr": ""
+  },
+  {
+    "script": "data_tools.py",
+    "exit_code": 0,
+    "has_usage": true,
+    "stderr": ""
+  },
+  {
+    "script": "train.py",
+    "exit_code": 0,
+    "has_usage": true,
+    "stderr": ""
+  },
+  {
+    "script": "infer.py",
+    "exit_code": 0,
+    "has_usage": true,
+    "stderr": ""
+  },
+  {
+    "script": "benchmark.py",
+    "exit_code": 0,
+    "has_usage": true,
+    "stderr": ""
+  },
+  {
+    "script": "evaluate.py",
+    "exit_code": 0,
+    "has_usage": true,
+    "stderr": ""
+  },
+  {
+    "script": "export.py",
+    "exit_code": 0,
+    "has_usage": true,
+    "stderr": ""
+  },
+  {
+    "script": "quantize.py",
+    "exit_code": 0,
+    "has_usage": true,
+    "stderr": ""
+  }
+]

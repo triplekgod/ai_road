@@ -1,0 +1,70 @@
+{
+  "purpose": "synthetic end-to-end smoke; untrained weights; not target CPU acceptance",
+  "runs": [
+    {
+      "architecture": "lite_road_net",
+      "backend": "pytorch",
+      "quantized": false,
+      "frames": 85,
+      "source_fps": 17.5,
+      "report": "lite_road_net_pytorch.json"
+    },
+    {
+      "architecture": "lite_road_net",
+      "backend": "onnxruntime",
+      "quantized": false,
+      "frames": 85,
+      "source_fps": 17.5,
+      "report": "lite_road_net_onnxruntime.json"
+    },
+    {
+      "architecture": "lite_road_net",
+      "backend": "openvino",
+      "quantized": false,
+      "frames": 85,
+      "source_fps": 17.5,
+      "report": "lite_road_net_openvino.json"
+    },
+    {
+      "architecture": "lite_road_net",
+      "backend": "onnxruntime",
+      "quantized": true,
+      "frames": 85,
+      "source_fps": 17.5,
+      "report": "lite_road_net_onnxruntime_int8.json"
+    },
+    {
+      "architecture": "fast_scnn_lite",
+      "backend": "pytorch",
+      "quantized": false,
+      "frames": 85,
+      "source_fps": 17.5,
+      "report": "fast_scnn_lite_pytorch.json"
+    },
+    {
+      "architecture": "fast_scnn_lite",
+      "backend": "onnxruntime",
+      "quantized": false,
+      "frames": 85,
+      "source_fps": 17.5,
+      "report": "fast_scnn_lite_onnxruntime.json"
+    },
+    {
+      "architecture": "fast_scnn_lite",
+      "backend": "openvino",
+      "quantized": false,
+      "frames": 85,
+      "source_fps": 17.5,
+      "report": "fast_scnn_lite_openvino.json"
+    },
+    {
+      "architecture": "fast_scnn_lite",
+      "backend": "onnxruntime",
+      "quantized": true,
+      "frames": 85,
+      "source_fps": 17.5,
+      "report": "fast_scnn_lite_onnxruntime_int8.json"
+    }
+  ],
+  "cli_exit_code": 0
+}

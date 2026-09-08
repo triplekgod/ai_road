@@ -158,12 +158,18 @@ def smooth_road_mask(mask):
 
 
 def draw_zone_outlines(colored_zones, road):
-    """Draw a dark outer road contour and white borders between visible zones."""
+    """White internal boundaries and blue external contour, clipped to road."""
     result = colored_zones.copy()
+    green = cv2.inRange(colored_zones, (0, 255, 0), (0, 255, 0))
+    yellow = cv2.inRange(colored_zones, (0, 255, 255), (0, 255, 255))
+    internal = (cv2.dilate(green, np.ones((3, 3), np.uint8)) > 0) & (yellow > 0)
+    result[internal] = (255, 255, 255)
     contours, _ = cv2.findContours(road, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    cv2.drawContours(result, contours, -1, (255, 80, 0), 2, cv2.LINE_AA)
-    for color in ((0, 255, 255), (0, 255, 0)):
-        pixels = cv2.inRange(colored_zones, np.array(color), np.array(color))
-        contours, _ = cv2.findContours(pixels, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-        cv2.drawContours(result, contours, -1, (255, 255, 255), 1, cv2.LINE_AA)
+    cv2.drawContours(result, contours, -1, (255, 0, 0), 1, cv2.LINE_8)
+    result[road == 0] = 0
     return result
+
+
+# The historical functions above retain their scanline behavior for comparison.
+# Stateful centerline geometry is the default selected by the video CLI.
+from centerline import Branch, CenterlineGeometry, GeometryConfig, GeometryResult  # noqa: E402,F401

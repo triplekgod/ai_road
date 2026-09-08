@@ -1,0 +1,104 @@
+{
+  "groups": [
+    {
+      "group": "trip01",
+      "images_dir": "../data/trip01/images",
+      "masks_dir": "../data/trip01/masks"
+    },
+    {
+      "group": "trip02",
+      "images_dir": "../data/trip02/images",
+      "masks_dir": "../data/trip02/masks"
+    },
+    {
+      "group": "trip03",
+      "images_dir": "../data/trip03/images",
+      "masks_dir": "../data/trip03/masks"
+    },
+    {
+      "group": "trip04",
+      "images_dir": "../data/trip04/images",
+      "masks_dir": "../data/trip04/masks"
+    },
+    {
+      "group": "trip05",
+      "images_dir": "../data/trip05/images",
+      "masks_dir": "../data/trip05/masks"
+    },
+    {
+      "group": "trip06",
+      "images_dir": "../data/trip06/images",
+      "masks_dir": "../data/trip06/masks"
+    },
+    {
+      "group": "trip07",
+      "images_dir": "../data/trip07/images",
+      "masks_dir": "../data/trip07/masks"
+    },
+    {
+      "group": "trip08",
+      "images_dir": "../data/trip08/images",
+      "masks_dir": "../data/trip08/masks"
+    },
+    {
+      "group": "trip09",
+      "images_dir": "../data/trip09/images",
+      "masks_dir": "../data/trip09/masks"
+    },
+    {
+      "group": "trip10",
+      "images_dir": "../data/trip10/images",
+      "masks_dir": "../data/trip10/masks"
+    },
+    {
+      "group": "trip11",
+      "images_dir": "../data/trip11/images",
+      "masks_dir": "../data/trip11/masks"
+    },
+    {
+      "group": "trip12",
+      "images_dir": "../data/trip12/images",
+      "masks_dir": "../data/trip12/masks"
+    },
+    {
+      "group": "trip13",
+      "images_dir": "../data/trip13/images",
+      "masks_dir": "../data/trip13/masks"
+    },
+    {
+      "group": "trip14",
+      "images_dir": "../data/trip14/images",
+      "masks_dir": "../data/trip14/masks"
+    },
+    {
+      "group": "trip15",
+      "images_dir": "../data/trip15/images",
+      "masks_dir": "../data/trip15/masks"
+    },
+    {
+      "group": "trip16",
+      "images_dir": "../data/trip16/images",
+      "masks_dir": "../data/trip16/masks"
+    },
+    {
+      "group": "trip17",
+      "images_dir": "../data/trip17/images",
+      "masks_dir": "../data/trip17/masks"
+    },
+    {
+      "group": "trip18",
+      "images_dir": "../data/trip18/images",
+      "masks_dir": "../data/trip18/masks"
+    },
+    {
+      "group": "trip19",
+      "images_dir": "../data/trip19/images",
+      "masks_dir": "../data/trip19/masks"
+    },
+    {
+      "group": "trip20",
+      "images_dir": "../data/trip20/images",
+      "masks_dir": "../data/trip20/masks"
+    }
+  ]
+}

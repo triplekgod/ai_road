@@ -1,7 +1,15 @@
 __pycache__/
 *.py[cod]
+.pytest_cache/
 .venv/
 venv/
-*.pth
-*.mp4
+pytest-of-*/
 crossroad_test_result.png
+data/
+models/
+*.pth
+*.onnx
+*.onnx.data
+*.mp4
+*.avi
+benchmark.json
