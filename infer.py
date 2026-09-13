@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 import torch
 from model import LiteRoadNet
-from road_geometry import Zones, draw_zone_outlines, primary_road, smooth_road_mask, zone_mask
+from road_geometry import Zones, draw_zone_outlines, primary_road, smooth_road_mask
 from corridor_tracker import CorridorConfig, CorridorTracker
 
 
@@ -59,7 +59,7 @@ def main():
     p.add_argument("--min-confirmed-frames", type=int, default=4, help="votes required for a road pixel")
     p.add_argument("--anchor-x", type=float, default=.50, help="vehicle center X as a fraction of frame width")
     p.add_argument("--anchor-y", type=float, default=.88, help="vehicle point Y as a fraction of frame height")
-    p.add_argument("--branch-confirm-frames", type=int, default=5)
+    p.add_argument("--branch-confirm-frames", type=int, default=8)
     p.add_argument("--branch-hold-frames", type=int, default=12)
     p.add_argument("--no-display", action="store_true")
     a = p.parse_args()

@@ -106,9 +106,9 @@ python infer.py C:\data\test_video.mp4 C:\data\models\lite_road_model.pth --temp
 Положение автомобиля в кадре и устойчивость развилок можно подстроить без переобучения:
 
 ```powershell
-# камера примерно по центру; ветвь подтвердится после 5 кадров и
+# камера примерно по центру; ветвь подтвердится после 8 кадров и
 # будет удерживаться до 12 кадров при кратком пропадании маски
-python infer.py C:\data\test_video.mp4 C:\data\models\lite_road_model.pth --anchor-x 0.50 --anchor-y 0.88 --branch-confirm-frames 5 --branch-hold-frames 12
+python infer.py C:\data\test_video.mp4 C:\data\models\lite_road_model.pth --anchor-x 0.50 --anchor-y 0.88 --branch-confirm-frames 8 --branch-hold-frames 12
 ```
 
 `--anchor-x` и `--anchor-y` — доли ширины и высоты кадра, где находится нижняя точка движения машины. Если камера сильно смещена, сначала настройте именно их. Увеличение `--branch-confirm-frames` уменьшает ложные ветви; уменьшение делает реакцию на настоящий поворот быстрее.

@@ -26,8 +26,8 @@ class CorridorTrackerTest(unittest.TestCase):
         # Both arms meet the common trunk on the next row.  The tracker must
         # not accept one-frame segmentation noise as a new road direction.
         road[82:, 68:124] = 255
-        road[:82, 22:90] = 255
-        road[:82, 102:170] = 255
+        road[:82, 16:82] = 255
+        road[:82, 110:176] = 255
         tracker = CorridorTracker(self.zones, CorridorConfig(branch_confirm_frames=3))
         for _ in range(2):
             result = tracker.update(road, np.full_like(road, 120))

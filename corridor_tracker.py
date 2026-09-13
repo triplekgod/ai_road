@@ -18,10 +18,11 @@ class CorridorConfig:
     max_step_fraction: float = .065
     predicted_weight: float = 1.8
     smooth_weight: float = .7
-    branch_confirm_frames: int = 5
+    branch_confirm_frames: int = 8
     branch_hold_frames: int = 12
-    min_branch_rows: float = .10
-    min_branch_gap: float = .06
+    min_branch_rows: float = .18
+    min_branch_gap: float = .12
+    min_visible_width: float = .12
 
     def __post_init__(self):
         if not 0 <= self.anchor_x <= 1 or not 0 <= self.anchor_y <= 1:
@@ -108,11 +109,17 @@ class CorridorTracker:
         path[anchor_y] = anchor_x
         previous = float(anchor_x)
         max_step = max(2, round(w * self.config.max_step_fraction))
-        observed, support, proximity = 0, [], []
+        observed, support, proximity, missing = 0, [], [], 0
         for y in range(anchor_y, -1, -1):
             xs = np.flatnonzero(road[y])
             if not len(xs):
+                missing += 1
+                # Do not jump from the true road to a small disconnected
+                # prediction on the dashboard or at a mask tear.
+                if observed and missing >= 2:
+                    break
                 continue
+            missing = 0
             allowed = xs[np.abs(xs - previous) <= max_step]
             if not len(allowed):
                 allowed = xs
@@ -132,15 +139,12 @@ class CorridorTracker:
             values = path[valid]
             smoothed = cv2.medianBlur(values.reshape(1, -1).astype(np.float32), 5).ravel()
             path[valid] = smoothed
-            path[:valid[0]] = path[valid[0]]
-            path[valid[-1] + 1:] = path[valid[-1]]
-        else:
-            path = prediction
+        state_path = np.where(np.isfinite(path), path, prediction)
         coverage = observed / max(1, anchor_y + 1)
         width_support = min(1., float(np.mean(support) if support else 0.) / max(1., w * .12))
         continuity = 1. - min(1., float(np.mean(proximity) if proximity else 1.) * 4.)
         confidence = .45 * coverage + .35 * width_support + .20 * continuity
-        return path, distance, float(np.clip(confidence, 0., 1.))
+        return path, state_path, distance, float(np.clip(confidence, 0., 1.))
 
     def _branch_candidates(self, road, main_x):
         h, w = road.shape
@@ -192,16 +196,29 @@ class CorridorTracker:
                 updated[side] = BranchState(old.points, old.count, old.missed + 1)
         self.branches = updated
 
-    @staticmethod
-    def _paint_corridor(road, distance, paths, center_share):
+    def _paint_corridor(self, road, paths, center_share):
+        """Paint row bands, rather than distance-transform discs.
+
+        Discs turn a very wide or ragged mask into a green blob.  A band has
+        a road-long direction by construction and ignores narrow dashboard
+        fragments that are not usable road surface.
+        """
         center = np.zeros_like(road)
         h, w = road.shape
+        min_width = max(8, round(w * self.config.min_visible_width))
         for path in paths:
-            for x, y in np.rint(path).astype(np.int32):
+            visible_path = path[np.isfinite(path).all(axis=1)]
+            for x, y in np.rint(visible_path).astype(np.int32):
                 if 0 <= x < w and 0 <= y < h and road[y, x]:
-                    radius = max(1, round(float(distance[y, x]) * center_share))
-                    cv2.circle(center, (x, y), radius, 255, -1, cv2.LINE_AA)
-        return cv2.bitwise_and(center, road)
+                    span = next(((left, right) for left, right in _segments(road[y])
+                                 if left <= x <= right), None)
+                    if span is None or span[1] - span[0] + 1 < min_width:
+                        continue
+                    half_width = max(1, round((span[1] - span[0] + 1) * center_share / 2))
+                    left = max(span[0], x - half_width)
+                    right = min(span[1] + 1, x + half_width + 1)
+                    center[y, left:right] = 255
+        return center
 
     def update(self, road, gray):
         road = np.where(road > 0, 255, 0).astype(np.uint8)
@@ -210,10 +227,10 @@ class CorridorTracker:
         dx, dy = self._flow_shift(gray)
         prediction = self._prediction(road.shape[0], road.shape[1], dx, dy)
         if cv2.countNonZero(road):
-            main, distance, confidence = self._trace_main(road, prediction)
-            candidates = self._branch_candidates(road, main)
+            main, state_path, distance, confidence = self._trace_main(road, prediction)
+            candidates = self._branch_candidates(road, state_path)
             self._update_branches(candidates)
-            self.main_x = main
+            self.main_x = state_path
         else:
             main, confidence = prediction, 0.
             distance = np.zeros_like(road, np.float32)
@@ -224,7 +241,7 @@ class CorridorTracker:
         paths = [main_path]
         paths += [state.points for state in self.branches.values()
                   if state.count >= self.config.branch_confirm_frames and state.missed == 0]
-        center = self._paint_corridor(road, distance, paths, self.zones.center)
+        center = self._paint_corridor(road, paths, self.zones.center)
         colors = np.zeros((*road.shape, 3), np.uint8)
         colors[road > 0] = (0, 255, 255)
         colors[center > 0] = (0, 255, 0)
