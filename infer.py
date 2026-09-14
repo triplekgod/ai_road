@@ -42,8 +42,7 @@ def main():
     parser = argparse.ArgumentParser(description="Segment road and draw stable longitudinal zones")
     parser.add_argument("source", help="video or image folder")
     parser.add_argument("checkpoint", type=Path)
-    parser.add_argument("--out", type=Path, default=Path("runs/predictions"))
-    parser.add_argument("--save-frames", action="store_true", help="save JPEG frames (slower)")
+    parser.add_argument("--output-video", type=Path, help="write rendered frames directly to MP4")
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--threads", type=int, default=0, help="CPU threads; 0 = automatic")
     parser.add_argument("--width", type=int, default=0, help="0 = checkpoint default, 256 = weak CPU")
@@ -57,11 +56,20 @@ def main():
     image_size = model.input_size if args.width == 0 else (args.width, max(90, round(args.width * 9 / 16)))
     if device.type == "cpu":
         model = model.to(memory_format=torch.channels_last)
-    if args.save_frames:
-        args.out.mkdir(parents=True, exist_ok=True)
+    source_path = Path(args.source)
+    source_fps = 25.0
+    if source_path.is_file():
+        probe = cv2.VideoCapture(str(source_path))
+        detected_fps = probe.get(cv2.CAP_PROP_FPS)
+        probe.release()
+        if detected_fps and np.isfinite(detected_fps):
+            source_fps = float(detected_fps)
+    writer = None
+    if args.output_video:
+        args.output_video.parent.mkdir(parents=True, exist_ok=True)
     state = CorridorState()
     parameters = sum(p.numel() for p in model.parameters())
-    print(f"device={device} arch={model.architecture} params={parameters/1e6:.2f}M input={image_size[0]}x{image_size[1]} threads={torch.get_num_threads()} save_frames={args.save_frames}")
+    print(f"device={device} arch={model.architecture} params={parameters/1e6:.2f}M input={image_size[0]}x{image_size[1]} threads={torch.get_num_threads()} output_video={args.output_video}")
     print("colors: LEFT=blue CENTER=green RIGHT=red; black holes remain obstacles")
 
     for index, (name, frame) in enumerate(frame_source(args.source)):
@@ -81,8 +89,14 @@ def main():
         status = f"FPS {fps:.1f}  heading {info['heading_deg']:+.1f} deg  confidence {info['confidence']:.2f}"
         cv2.rectangle(output, (0, 0), (min(output.shape[1], 680), 42), (0, 0, 0), -1)
         cv2.putText(output, status, (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (255, 255, 255), 2, cv2.LINE_AA)
-        if args.save_frames:
-            cv2.imwrite(str(args.out / f"{Path(name).stem}_zones.jpg"), output, [cv2.IMWRITE_JPEG_QUALITY, 88])
+        if args.output_video:
+            if writer is None:
+                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                writer = cv2.VideoWriter(str(args.output_video), fourcc, source_fps, (output.shape[1], output.shape[0]))
+                if not writer.isOpened():
+                    raise RuntimeError(f"Cannot create MP4: {args.output_video}")
+                print(f"video_writer={args.output_video} fps={source_fps:.3f} size={output.shape[1]}x{output.shape[0]}")
+            writer.write(output)
         print(f"frame={index:06d} road_px={total} left={counts[1]/total:.1%} center={counts[2]/total:.1%} right={counts[3]/total:.1%} heading={info['heading_deg']:+.1f}deg confidence={info['confidence']:.3f} fps={fps:.1f}")
         if not args.no_show:
             cv2.imshow("AI Road - live | Q/Esc: stop | Space: pause", output)
@@ -94,6 +108,9 @@ def main():
                 print("paused=true; press any key to continue")
                 cv2.waitKey(0)
 
+    if writer is not None:
+        writer.release()
+        print(f"video_saved={args.output_video}")
     if not args.no_show:
         cv2.destroyAllWindows()
 

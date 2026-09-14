@@ -61,13 +61,13 @@ def infer():
     threshold = ask("Порог дороги", "0.5")
     width = ask("Ширина входа: 256 слабый CPU, 320 точнее", "256")
     show = ask("Показывать кадры в реальном времени? y/n", "y").lower()
-    save = ask("Сохранять каждый кадр в JPEG? Это снижает FPS. y/n", "n").lower()
+    save = ask("Записать обработанное видео в MP4? y/n", "y").lower()
     arguments = [source, checkpoint, "--threshold", threshold, "--width", width]
     if show in {"n", "no", "нет"}:
         arguments.append("--no-show")
     if save in {"y", "yes", "да"}:
-        output = ask("Каталог результата", "runs/predictions")
-        arguments.extend(("--save-frames", "--out", output))
+        output = ask("Путь итогового MP4", "runs/result.mp4")
+        arguments.extend(("--output-video", output))
     run("infer.py", *arguments)
 
 
