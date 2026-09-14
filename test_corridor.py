@@ -23,6 +23,10 @@ def test_partition_and_obstacle():
     assert set(np.unique(zones)) == {0, 1, 2, 3}
     assert np.isfinite(info["heading_deg"])
 
+    fork = zones[18:100, 70:205]
+    fork_labels = set(np.unique(fork)) - {0}
+    assert fork_labels == {1, 2, 3}, f"fork zones are incomplete: {fork_labels}"
+
     empty, state, _ = build_zones(np.zeros_like(probability), state, 0.5)
     assert not empty.any(), "no-road frame must stay empty even after a road frame"
 
