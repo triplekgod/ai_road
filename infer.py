@@ -1,4 +1,5 @@
 import argparse
+import os
 import time
 from pathlib import Path
 
@@ -7,12 +8,12 @@ import numpy as np
 import torch
 
 from corridor import CorridorState, build_zones, overlay_zones
-from data import IMAGE_SIZE, MEAN, STD
+from data import MEAN, STD
 from road_model import load_model
 
 
-def tensor_from_frame(frame, device):
-    image = cv2.resize(frame, IMAGE_SIZE, interpolation=cv2.INTER_AREA)
+def tensor_from_frame(frame, device, image_size):
+    image = cv2.resize(frame, image_size, interpolation=cv2.INTER_AREA)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
     image = (image - np.asarray(MEAN, np.float32)) / np.asarray(STD, np.float32)
     return torch.from_numpy(image.transpose(2, 0, 1)).unsqueeze(0).to(device)
@@ -42,20 +43,34 @@ def main():
     parser.add_argument("source", help="video or image folder")
     parser.add_argument("checkpoint", type=Path)
     parser.add_argument("--out", type=Path, default=Path("runs/predictions"))
+    parser.add_argument("--save-frames", action="store_true", help="save JPEG frames (slower)")
     parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--threads", type=int, default=0, help="CPU threads; 0 = automatic")
+    parser.add_argument("--width", type=int, default=0, help="0 = checkpoint default, 256 = weak CPU")
     parser.add_argument("--no-show", action="store_true", help="disable the live OpenCV window")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device.type == "cpu" and args.threads > 0:
+        torch.set_num_threads(args.threads)
     model = load_model(args.checkpoint, device)
-    args.out.mkdir(parents=True, exist_ok=True)
+    image_size = model.input_size if args.width == 0 else (args.width, max(90, round(args.width * 9 / 16)))
+    if device.type == "cpu":
+        model = model.to(memory_format=torch.channels_last)
+    if args.save_frames:
+        args.out.mkdir(parents=True, exist_ok=True)
     state = CorridorState()
+    parameters = sum(p.numel() for p in model.parameters())
+    print(f"device={device} arch={model.architecture} params={parameters/1e6:.2f}M input={image_size[0]}x{image_size[1]} threads={torch.get_num_threads()} save_frames={args.save_frames}")
     print("colors: LEFT=blue CENTER=green RIGHT=red; black holes remain obstacles")
 
     for index, (name, frame) in enumerate(frame_source(args.source)):
         started = time.perf_counter()
         with torch.inference_mode(), torch.amp.autocast("cuda", enabled=device.type == "cuda"):
-            probability = model(tensor_from_frame(frame, device)).sigmoid()[0, 0].float().cpu().numpy()
+            tensor = tensor_from_frame(frame, device, image_size)
+            if device.type == "cpu":
+                tensor = tensor.contiguous(memory_format=torch.channels_last)
+            probability = model(tensor).sigmoid()[0, 0].float().cpu().numpy()
         geometry_probability = cv2.resize(probability, (320, 180), interpolation=cv2.INTER_AREA)
         small_zones, state, info = build_zones(geometry_probability, state, args.threshold)
         zones = cv2.resize(small_zones, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
@@ -66,7 +81,8 @@ def main():
         status = f"FPS {fps:.1f}  heading {info['heading_deg']:+.1f} deg  confidence {info['confidence']:.2f}"
         cv2.rectangle(output, (0, 0), (min(output.shape[1], 680), 42), (0, 0, 0), -1)
         cv2.putText(output, status, (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (255, 255, 255), 2, cv2.LINE_AA)
-        cv2.imwrite(str(args.out / f"{Path(name).stem}_zones.jpg"), output)
+        if args.save_frames:
+            cv2.imwrite(str(args.out / f"{Path(name).stem}_zones.jpg"), output, [cv2.IMWRITE_JPEG_QUALITY, 88])
         print(f"frame={index:06d} road_px={total} left={counts[1]/total:.1%} center={counts[2]/total:.1%} right={counts[3]/total:.1%} heading={info['heading_deg']:+.1f}deg confidence={info['confidence']:.3f} fps={fps:.1f}")
         if not args.no_show:
             cv2.imshow("AI Road - live | Q/Esc: stop | Space: pause", output)

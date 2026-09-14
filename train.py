@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from data import RoadDataset, find_pairs
+from data import ACCURATE_SIZE, FAST_SIZE, RoadDataset, find_pairs
 from road_model import RoadNet
 
 
@@ -79,6 +79,7 @@ def main():
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--workers", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--arch", choices=("fast", "accurate"), default="fast")
     parser.add_argument("--no-pretrained", action="store_true")
     parser.add_argument("--out", type=Path, default=Path("runs/roadnet.pt"))
     args = parser.parse_args()
@@ -89,21 +90,23 @@ def main():
     pairs = find_pairs(args.data)
     if len(pairs) < 10:
         raise SystemExit(f"Need at least 10 labeled pairs, found {len(pairs)}")
-    if args.batch < 2:
+    if args.arch == "accurate" and args.batch < 2:
         raise SystemExit("DeepLabV3 training requires --batch 2 or larger because of BatchNorm")
 
     # Chronological split prevents almost-identical neighbouring frames leaking into validation.
     cut = max(1, int(len(pairs) * 0.8))
     train_pairs, val_pairs = pairs[:cut], pairs[cut:]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    train_loader = DataLoader(RoadDataset(train_pairs, True), args.batch, shuffle=True, num_workers=args.workers, pin_memory=device.type == "cuda", drop_last=True)
-    val_loader = DataLoader(RoadDataset(val_pairs), args.batch, num_workers=args.workers, pin_memory=device.type == "cuda")
-    model = RoadNet(pretrained=not args.no_pretrained).to(device)
+    image_size = FAST_SIZE if args.arch == "fast" else ACCURATE_SIZE
+    train_loader = DataLoader(RoadDataset(train_pairs, True, image_size), args.batch, shuffle=True, num_workers=args.workers, pin_memory=device.type == "cuda", drop_last=args.arch == "accurate")
+    val_loader = DataLoader(RoadDataset(val_pairs, image_size=image_size), args.batch, num_workers=args.workers, pin_memory=device.type == "cuda")
+    model = RoadNet(args.arch, pretrained=not args.no_pretrained).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda")
     best_iou = -1.0
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    print(f"device={device} train={len(train_pairs)} val={len(val_pairs)} size=512x288 output={args.out}")
+    parameters = sum(p.numel() for p in model.parameters())
+    print(f"device={device} arch={args.arch} params={parameters/1e6:.2f}M train={len(train_pairs)} val={len(val_pairs)} size={image_size[0]}x{image_size[1]} output={args.out}")
 
     for epoch in range(1, args.epochs + 1):
         started = time.perf_counter()
@@ -115,7 +118,9 @@ def main():
             optimizer.zero_grad(set_to_none=True)
             with torch.amp.autocast("cuda", enabled=device.type == "cuda"):
                 outputs = model(images)
-                loss = loss_fn(outputs["out"], masks) + 0.3 * loss_fn(outputs["aux"], masks)
+                loss = loss_fn(outputs["out"], masks)
+                if "aux" in outputs:
+                    loss = loss + 0.3 * loss_fn(outputs["aux"], masks)
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
@@ -128,7 +133,7 @@ def main():
         print(f"EPOCH {epoch}/{args.epochs} train_loss={train_loss/seen:.4f} val_loss={metrics['loss']:.4f} IoU={metrics['iou']:.4f} Dice={metrics['dice']:.4f} no_road_acc={metrics['no_road_acc']:.3f} time={_clock(elapsed)}")
         if metrics["iou"] > best_iou:
             best_iou = metrics["iou"]
-            torch.save({"model": model.state_dict(), "epoch": epoch, "val": metrics}, args.out)
+            torch.save({"model": model.state_dict(), "architecture": args.arch, "input_size": image_size, "epoch": epoch, "val": metrics}, args.out)
             print(f"  saved={args.out} best_IoU={best_iou:.4f}")
 
 

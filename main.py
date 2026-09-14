@@ -42,8 +42,11 @@ def train():
     epochs = ask("Количество эпох", "30")
     batch = ask("Размер батча", "4")
     output = ask("Куда сохранить лучшую модель", "runs/roadnet.pt")
-    pretrained = ask("Использовать предобученный ResNet-50? y/n", "y").lower()
-    arguments = [data, "--epochs", epochs, "--batch", batch, "--out", output]
+    architecture = ask("Архитектура fast/accurate", "fast").lower()
+    if architecture not in {"fast", "accurate"}:
+        architecture = "fast"
+    pretrained = ask("Использовать предобученный ImageNet-кодировщик? y/n", "y").lower()
+    arguments = [data, "--epochs", epochs, "--batch", batch, "--out", output, "--arch", architecture]
     if pretrained in {"n", "no", "нет"}:
         arguments.append("--no-pretrained")
     run("train.py", *arguments)
@@ -55,12 +58,16 @@ def infer():
         print("Источник не задан.")
         return
     checkpoint = ask("Путь к модели", "runs/roadnet.pt")
-    output = ask("Каталог результата", "runs/predictions")
     threshold = ask("Порог дороги", "0.5")
+    width = ask("Ширина входа: 256 слабый CPU, 320 точнее", "256")
     show = ask("Показывать кадры в реальном времени? y/n", "y").lower()
-    arguments = [source, checkpoint, "--out", output, "--threshold", threshold]
+    save = ask("Сохранять каждый кадр в JPEG? Это снижает FPS. y/n", "n").lower()
+    arguments = [source, checkpoint, "--threshold", threshold, "--width", width]
     if show in {"n", "no", "нет"}:
         arguments.append("--no-show")
+    if save in {"y", "yes", "да"}:
+        output = ask("Каталог результата", "runs/predictions")
+        arguments.extend(("--save-frames", "--out", output))
     run("infer.py", *arguments)
 
 

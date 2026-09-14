@@ -6,7 +6,8 @@ from PIL import Image, ImageEnhance
 from torch.utils.data import Dataset
 from torchvision.transforms import functional as F
 
-IMAGE_SIZE = (512, 288)  # width, height; original aspect ratio is preserved
+FAST_SIZE = (320, 180)
+ACCURATE_SIZE = (512, 288)
 MEAN = (0.485, 0.456, 0.406)
 STD = (0.229, 0.224, 0.225)
 
@@ -23,9 +24,10 @@ def find_pairs(root: str | Path):
 
 
 class RoadDataset(Dataset):
-    def __init__(self, pairs, augment=False):
+    def __init__(self, pairs, augment=False, image_size=FAST_SIZE):
         self.pairs = list(pairs)
         self.augment = augment
+        self.image_size = image_size
 
     def __len__(self):
         return len(self.pairs)
@@ -43,10 +45,9 @@ class RoadDataset(Dataset):
                 image = ImageEnhance.Contrast(image).enhance(random.uniform(0.75, 1.25))
                 image = ImageEnhance.Color(image).enhance(random.uniform(0.75, 1.25))
 
-        image = F.resize(image, IMAGE_SIZE[::-1], antialias=True)
-        mask = F.resize(mask, IMAGE_SIZE[::-1], interpolation=F.InterpolationMode.NEAREST)
+        image = F.resize(image, self.image_size[::-1], antialias=True)
+        mask = F.resize(mask, self.image_size[::-1], interpolation=F.InterpolationMode.NEAREST)
         image = F.normalize(F.pil_to_tensor(image).float() / 255.0, MEAN, STD)
         mask = (F.pil_to_tensor(mask).float() > 0.5).float()
         return image, mask, image_path.name
-
 
