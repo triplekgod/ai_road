@@ -12,6 +12,27 @@ from data import RoadDataset, find_pairs
 from road_model import RoadNet
 
 
+def _clock(seconds):
+    seconds = max(0, int(seconds))
+    return f"{seconds // 60:02d}:{seconds % 60:02d}"
+
+
+def show_progress(stage, current, total, loss, started):
+    width = 28
+    ratio = current / max(total, 1)
+    filled = min(width, int(width * ratio))
+    bar = "#" * filled + "-" * (width - filled)
+    elapsed = time.perf_counter() - started
+    eta = elapsed / max(current, 1) * max(total - current, 0)
+    print(
+        f"\r{stage:<13} [{bar}] {ratio:6.1%} "
+        f"batch={current}/{total} loss={loss:.4f} "
+        f"time={_clock(elapsed)} eta={_clock(eta)}",
+        end="\n" if current == total else "",
+        flush=True,
+    )
+
+
 def loss_fn(logits, target):
     bce = F.binary_cross_entropy_with_logits(logits, target)
     probability = logits.sigmoid()
@@ -21,13 +42,16 @@ def loss_fn(logits, target):
 
 
 @torch.no_grad()
-def validate(model, loader, device):
+def validate(model, loader, device, epoch, epochs):
     model.eval()
     totals = dict(loss=0.0, intersection=0.0, union=0.0, pred=0.0, target=0.0, empty=0, empty_ok=0)
-    for images, masks, _ in loader:
+    started = time.perf_counter()
+    seen = 0
+    for batch_index, (images, masks, _) in enumerate(loader, 1):
         images, masks = images.to(device), masks.to(device)
         logits = model(images)
         totals["loss"] += loss_fn(logits, masks).item() * len(images)
+        seen += len(images)
         pred = logits.sigmoid() > 0.5
         truth = masks > 0.5
         totals["intersection"] += (pred & truth).sum().item()
@@ -37,6 +61,7 @@ def validate(model, loader, device):
         empty = truth.flatten(1).sum(1) == 0
         totals["empty"] += empty.sum().item()
         totals["empty_ok"] += ((pred.flatten(1).float().mean(1) < 0.005) & empty).sum().item()
+        show_progress(f"VAL {epoch}/{epochs}", batch_index, len(loader), totals["loss"] / seen, started)
     i = totals["intersection"]
     return {
         "loss": totals["loss"] / len(loader.dataset),
@@ -78,13 +103,14 @@ def main():
     scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda")
     best_iou = -1.0
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    print(f"device={device} train={len(train_pairs)} val={len(val_pairs)} size=512x288")
+    print(f"device={device} train={len(train_pairs)} val={len(val_pairs)} size=512x288 output={args.out}")
 
     for epoch in range(1, args.epochs + 1):
         started = time.perf_counter()
         model.train()
         train_loss = 0.0
-        for images, masks, _ in train_loader:
+        seen = 0
+        for batch_index, (images, masks, _) in enumerate(train_loader, 1):
             images, masks = images.to(device, non_blocking=True), masks.to(device, non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
             with torch.amp.autocast("cuda", enabled=device.type == "cuda"):
@@ -94,10 +120,12 @@ def main():
             scaler.step(optimizer)
             scaler.update()
             train_loss += loss.item() * len(images)
+            seen += len(images)
+            show_progress(f"TRAIN {epoch}/{args.epochs}", batch_index, len(train_loader), train_loss / seen, started)
 
-        metrics = validate(model, val_loader, device)
+        metrics = validate(model, val_loader, device, epoch, args.epochs)
         elapsed = time.perf_counter() - started
-        print(f"epoch={epoch:03d} train_loss={train_loss/len(train_pairs):.4f} val_loss={metrics['loss']:.4f} IoU={metrics['iou']:.4f} Dice={metrics['dice']:.4f} no_road_acc={metrics['no_road_acc']:.3f} sec={elapsed:.1f}")
+        print(f"EPOCH {epoch}/{args.epochs} train_loss={train_loss/seen:.4f} val_loss={metrics['loss']:.4f} IoU={metrics['iou']:.4f} Dice={metrics['dice']:.4f} no_road_acc={metrics['no_road_acc']:.3f} time={_clock(elapsed)}")
         if metrics["iou"] > best_iou:
             best_iou = metrics["iou"]
             torch.save({"model": model.state_dict(), "epoch": epoch, "val": metrics}, args.out)

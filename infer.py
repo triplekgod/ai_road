@@ -43,6 +43,7 @@ def main():
     parser.add_argument("checkpoint", type=Path)
     parser.add_argument("--out", type=Path, default=Path("runs/predictions"))
     parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--no-show", action="store_true", help="disable the live OpenCV window")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -59,11 +60,26 @@ def main():
         small_zones, state, info = build_zones(geometry_probability, state, args.threshold)
         zones = cv2.resize(small_zones, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
         output = overlay_zones(frame, zones)
-        cv2.imwrite(str(args.out / f"{Path(name).stem}_zones.jpg"), output)
         counts = np.bincount(zones.ravel(), minlength=4)
         total = max(int(counts[1:].sum()), 1)
         fps = 1.0 / max(time.perf_counter() - started, 1e-6)
+        status = f"FPS {fps:.1f}  heading {info['heading_deg']:+.1f} deg  confidence {info['confidence']:.2f}"
+        cv2.rectangle(output, (0, 0), (min(output.shape[1], 680), 42), (0, 0, 0), -1)
+        cv2.putText(output, status, (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (255, 255, 255), 2, cv2.LINE_AA)
+        cv2.imwrite(str(args.out / f"{Path(name).stem}_zones.jpg"), output)
         print(f"frame={index:06d} road_px={total} left={counts[1]/total:.1%} center={counts[2]/total:.1%} right={counts[3]/total:.1%} heading={info['heading_deg']:+.1f}deg confidence={info['confidence']:.3f} fps={fps:.1f}")
+        if not args.no_show:
+            cv2.imshow("AI Road - live | Q/Esc: stop | Space: pause", output)
+            key = cv2.waitKey(1) & 0xFF
+            if key in (ord("q"), 27):
+                print("stopped_by_user=true")
+                break
+            if key == 32:
+                print("paused=true; press any key to continue")
+                cv2.waitKey(0)
+
+    if not args.no_show:
+        cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
